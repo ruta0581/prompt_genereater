@@ -1,0 +1,722 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>単語 → Prompt（英語）生成ツール（JSON手動保存）</title>
+  <style>
+    :root { --bg:#0b0d12; --panel:#121726; --panel2:#0f1422; --text:#e8eefc; --muted:#aab4d6; --line:#243050; --acc:#6aa6ff; --danger:#ff6a6a; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans JP", sans-serif; background:var(--bg); color:var(--text); }
+    header { padding:16px 18px; border-bottom:1px solid var(--line); background:linear-gradient(180deg, #0f1320, #0b0d12); }
+    header h1 { margin:0; font-size:16px; font-weight:700; }
+    header p { margin:6px 0 0; color:var(--muted); font-size:12px; line-height:1.4; }
+    main { padding:16px 18px; display:grid; gap:14px; grid-template-columns: 380px 1fr; }
+    @media (max-width: 980px){ main{ grid-template-columns:1fr; } }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:end; }
+    label { display:block; font-size:12px; color:var(--muted); margin:0 0 6px; }
+    input, textarea, button, select {
+      font: inherit;
+      border-radius:10px;
+      border:1px solid var(--line);
+      background:var(--panel2);
+      color:var(--text);
+      padding:10px 10px;
+      outline:none;
+    }
+    input:focus, textarea:focus, select:focus { border-color: #3b5aa7; box-shadow:0 0 0 3px rgba(106,166,255,.15); }
+    textarea { width:100%; min-height:160px; resize:vertical; line-height:1.4; }
+    button { cursor:pointer; transition: .12s transform, .12s opacity, .12s border-color; }
+    button:hover { border-color:#3b5aa7; }
+    button:active { transform: translateY(1px); }
+    .btn { background:#162044; }
+    .btn.acc { border-color:#2f5db6; }
+    .btn.danger { border-color:#7a2c2c; background:#2a1414; color:#ffd6d6; }
+    .grow { flex:1 1 auto; min-width: 180px; }
+    .hint { margin-top:8px; color:var(--muted); font-size:12px; line-height:1.5; white-space:pre-wrap; }
+    .error { margin-top:10px; padding:10px; border:1px solid #7a2c2c; background:#2a1414; color:#ffd6d6; border-radius:12px; font-size:12px; display:none; white-space:pre-wrap; }
+    .ok { margin-top:10px; padding:10px; border:1px solid #1f5a3a; background:#112318; color:#d7ffe9; border-radius:12px; font-size:12px; display:none; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Noto Sans Mono CJK JP", monospace; }
+    .divider { border:0; border-top:1px solid var(--line); margin:14px 0; }
+
+    /* list */
+    .listWrap { display:grid; grid-template-columns: 1fr; gap:12px; }
+    .group { border:1px solid var(--line); border-radius:14px; overflow:hidden; background:#0f1422; }
+    .groupHeader { padding:10px 12px; background:#101a33; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; }
+    .groupHeader b { font-size:13px; }
+    .groupHeader span { color:var(--muted); font-size:12px; }
+    .items { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    @media (max-width: 980px){ .items{ grid-template-columns:1fr; } }
+    .itemBtn {
+      padding:10px 12px;
+      border:0;
+      border-right:1px solid var(--line);
+      border-bottom:1px solid var(--line);
+      border-radius:0;
+      background:#0f1422;
+      text-align:left;
+      display:flex;
+      gap:10px;
+      align-items:center;
+      justify-content:space-between;
+    }
+    .itemBtn:hover { background:#121a33; }
+    .itemBtn .ja { font-weight:700; }
+    .itemBtn .en { color:var(--muted); font-size:12px; margin-left:8px; }
+    .itemBtn .right { display:flex; gap:8px; align-items:center; }
+    .pill { font-size:11px; color:#bcd3ff; border:1px solid #2f5db6; padding:2px 6px; border-radius:999px; }
+    details.manage {
+      margin-top:12px;
+      border:1px solid var(--line);
+      border-radius:14px;
+      background:#0f1422;
+      overflow:hidden;
+    }
+    details.manage > summary {
+      cursor:pointer;
+      padding:10px 12px;
+      background:#101a33;
+      border-bottom:1px solid var(--line);
+      list-style:none;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      user-select:none;
+    }
+    details.manage > summary::-webkit-details-marker { display:none; }
+    details.manage .body { padding:12px; }
+    .miniButtons button { padding:8px 10px; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>単語（日本語で一覧）→ クリックで Prompt（英語）生成</h1>
+  <p>
+    クリックで単語を<b>追加/削除（トグル）</b>します。<br/>
+    ページを開いたときに <b>index.html と同じ場所の JSON</b> を自動で1回だけ読み込みます（既定: <span class="mono">prompt_words.json</span>）。
+  </p>
+</header>
+
+<main>
+  <!-- Left: prompt first, then minimized management -->
+  <section class="card">
+    <div class="row" style="align-items:end;">
+      <div class="grow">
+        <label>モード</label>
+        <select id="selMode">
+          <option value="prompt">プロンプトモード（英語内の空白そのまま / 区切りはカンマ）</option>
+          <option value="site">サイトモード（英語内の空白→_ / 単語区切りは空白）</option>
+        </select>
+      </div>
+      <div class="grow">
+        <div class="hint" style="margin:0">
+          ・プロンプト: <span class="mono">best quality,masterpiece,</span>
+          ・サイト: <span class="mono">best_quality masterpiece</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="error" id="msgError"></div>
+    <div class="ok" id="msgOk"></div>
+
+    <hr class="divider">
+
+    <label>Prompt生成欄（英語）</label>
+    <textarea id="promptBox" class="mono" placeholder="ここに英語プロンプトが溜まっていきます"></textarea>
+
+    <div class="row" style="margin-top:10px; justify-content:flex-end;">
+      <button class="btn" id="btnExportPrompt">Promptをコピー</button>
+      <button class="btn danger" id="btnClearPrompt">Promptクリア</button>
+    </div>
+
+    <details class="manage">
+      <summary>
+        <b>単語登録・管理（最小化）</b>
+        <span class="mono" style="color:var(--muted); font-size:12px;">JSON/Import/Add/Delete</span>
+      </summary>
+      <div class="body">
+        <div class="hint">
+JSON形式：{"version":1,"items":[{"ja":"ひらがな/カタカナ","en":"english words"}]}
+・JSON読み込み：現在のリストに追加（重複は無視）
+・テキストインポート：<span class="mono">英語=日本語</span> を1行ずつ（例: <span class="mono">best_quality=ベストクオリティ</span>）
+※日本語条件NGの行が1つでもあると「全体を中止」します
+        </div>
+
+        <div class="row miniButtons" style="margin-top:10px;">
+          <button class="btn acc" id="btnLoad">JSON読み込み（ファイル）</button>
+          <button class="btn acc" id="btnSave">JSON保存</button>
+          <button class="btn" id="btnImportText">テキストインポート</button>
+          <input type="file" id="fileInput" accept="application/json" hidden />
+          <input type="file" id="textInput" accept=".txt,text/plain" hidden />
+        </div>
+
+        <hr class="divider">
+
+        <div class="row">
+          <div class="grow">
+            <label>単語入力（英語） ※「_」は自動で半角スペースに置換して登録</label>
+            <input id="inpEn" class="search mono" placeholder="例: masterpiece / best_quality / 1girl" />
+          </div>
+          <div class="grow">
+            <label>単語入力（日本語：ひらがな/カタカナのみ。英字/漢字NG）</label>
+            <input id="inpJa" class="search" placeholder="例: びじん / マスターピース" />
+          </div>
+          <div class="row miniButtons">
+            <button class="btn acc" id="btnAdd">単語登録</button>
+            <button class="btn danger" id="btnDeleteSelected">単語消去（選択中）</button>
+          </div>
+        </div>
+      </div>
+    </details>
+  </section>
+
+  <!-- Right: list -->
+  <section class="card">
+    <div class="row" style="justify-content:space-between; align-items:end;">
+      <div style="flex:1 1 auto;">
+        <label>単語検索（日本語/英語どちらでも） ※ひらがな/カタカナは同一扱い（あ＝ア）</label>
+        <input id="inpFilter" class="search" placeholder="例: び / ビ / masterpiece / quality" />
+      </div>
+    </div>
+
+    <div class="hint">
+      表示・並びは<b>日本語五十音のみ</b>。クリックでPromptへ<b>追加/削除（トグル）</b>。右側の「選択」タグは最後にクリックした単語です。
+    </div>
+
+    <div id="list" class="listWrap" style="margin-top:12px;"></div>
+  </section>
+</main>
+
+<script>
+(() => {
+  /** ========= 設定 ========= */
+  const params = new URLSearchParams(location.search);
+  const DEFAULT_JSON_URL = params.get("json") || "prompt_words.json";
+
+  /** ========= データ ========= */
+  const state = {
+    version: 1,
+    items: /** @type {{ja:string,en:string}[]} */ ([]), // enは内部的に「空白あり」の正規形で保存
+    selectedKey: /** @type {string|null} */ (null),
+    mode: /** @type {"prompt"|"site"} */ ("prompt"),
+  };
+
+  /** ========= 要素 ========= */
+  const el = {
+    btnLoad: document.getElementById("btnLoad"),
+    btnSave: document.getElementById("btnSave"),
+    fileInput: document.getElementById("fileInput"),
+    btnImportText: document.getElementById("btnImportText"),
+    textInput: document.getElementById("textInput"),
+
+    inpEn: document.getElementById("inpEn"),
+    inpJa: document.getElementById("inpJa"),
+    btnAdd: document.getElementById("btnAdd"),
+    btnDeleteSelected: document.getElementById("btnDeleteSelected"),
+    selMode: document.getElementById("selMode"),
+
+    promptBox: document.getElementById("promptBox"),
+    btnClearPrompt: document.getElementById("btnClearPrompt"),
+    btnExportPrompt: document.getElementById("btnExportPrompt"),
+
+    inpFilter: document.getElementById("inpFilter"),
+    list: document.getElementById("list"),
+    msgError: document.getElementById("msgError"),
+    msgOk: document.getElementById("msgOk"),
+  };
+
+  /** ========= メッセージ ========= */
+  function showError(msg) {
+    el.msgOk.style.display = "none";
+    el.msgError.textContent = msg;
+    el.msgError.style.display = "block";
+  }
+  function showOk(msg) {
+    el.msgError.style.display = "none";
+    el.msgOk.textContent = msg;
+    el.msgOk.style.display = "block";
+    setTimeout(() => { el.msgOk.style.display = "none"; }, 2200);
+  }
+
+  /** ========= 正規化/検証 ========= */
+  function normalizeSpaces(str) {
+    return String(str || "").replace(/\s+/g, " ").trim();
+  }
+  // 登録時：英語の "_" は " " に置換して保存
+  function normalizeEnForStore(enRaw) {
+    return normalizeSpaces(String(enRaw || "").replace(/_/g, " "));
+  }
+  const reKanaOnly = /^[ぁ-んァ-ヶー・\s]+$/u;
+  function validateJa(ja) {
+    const s = ja.trim();
+    if (!s) return "日本語が空です。";
+    if (!reKanaOnly.test(s)) return "日本語は「ひらがな/カタカナ（＋ー・空白）」のみです（英字/漢字/数字/記号NG）。";
+    return null;
+  }
+  function validateEn(en) {
+    if (!en.trim()) return "英語が空です。";
+    if (/\r|\n/.test(en)) return "英語に改行は使えません。";
+    return null;
+  }
+  function makeKey(ja, enStored) {
+    return `${ja}||${enStored}`;
+  }
+
+  /** ========= 五十音/かな正規化 ========= */
+  const GOJUON_GROUPS = [
+    { key: "あ", label: "あ行" }, { key: "か", label: "か行" }, { key: "さ", label: "さ行" }, { key: "た", label: "た行" },
+    { key: "な", label: "な行" }, { key: "は", label: "は行" }, { key: "ま", label: "ま行" }, { key: "や", label: "や行" },
+    { key: "ら", label: "ら行" }, { key: "わ", label: "わ行" }, { key: "ん", label: "ん" }, { key: "他", label: "その他" },
+  ];
+  const groupOrder = new Map(GOJUON_GROUPS.map((g, i) => [g.key, i]));
+
+  function toHiragana(str) {
+    return str.replace(/[ァ-ヶ]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0x60));
+  }
+  const baseMap = new Map(Object.entries({
+    "が":"か","ぎ":"き","ぐ":"く","げ":"け","ご":"こ",
+    "ざ":"さ","じ":"し","ず":"す","ぜ":"せ","ぞ":"そ",
+    "だ":"た","ぢ":"ち","づ":"つ","で":"て","ど":"と",
+    "ば":"は","び":"ひ","ぶ":"ふ","べ":"へ","ぼ":"ほ",
+    "ぱ":"は","ぴ":"ひ","ぷ":"ふ","ぺ":"へ","ぽ":"ほ",
+    "ゔ":"う",
+    "ぁ":"あ","ぃ":"い","ぅ":"う","ぇ":"え","ぉ":"お",
+    "ゃ":"や","ゅ":"ゆ","ょ":"よ","っ":"つ",
+    "ゎ":"わ",
+  }));
+  function normalizeKana(s) {
+    return toHiragana(String(s || "")).toLowerCase();
+  }
+  function firstKanaKey(ja) {
+    if (!ja) return "他";
+    let s = normalizeKana(ja.trim());
+    const ch = s[0];
+    const b = baseMap.get(ch) || ch;
+
+    if ("あいうえお".includes(b)) return "あ";
+    if ("かきくけこ".includes(b)) return "か";
+    if ("さしすせそ".includes(b)) return "さ";
+    if ("たちつてと".includes(b)) return "た";
+    if ("なにぬねの".includes(b)) return "な";
+    if ("はひふへほ".includes(b)) return "は";
+    if ("まみむめも".includes(b)) return "ま";
+    if ("やゆよ".includes(b)) return "や";
+    if ("らりるれろ".includes(b)) return "ら";
+    if ("わを".includes(b)) return "わ";
+    if ("ん".includes(b)) return "ん";
+    return "他";
+  }
+
+  /** ========= Prompt生成（モード） ========= */
+  function tokenForMode(enStored, mode) {
+    const base = normalizeSpaces(enStored);
+    if (!base) return "";
+    if (mode === "site") return base.replace(/ /g, "_");
+    return base; // prompt
+  }
+
+  function parsePromptToTokens(text, mode) {
+    const t = String(text || "").trim();
+    if (!t) return [];
+    if (mode === "prompt") {
+      return t.split(",").map(s => s.trim()).filter(Boolean);
+    } else {
+      return t.split(/\s+/).map(s => s.trim()).filter(Boolean);
+    }
+  }
+
+  function buildPromptFromTokens(tokens, mode) {
+    if (!tokens || tokens.length === 0) return "";
+    if (mode === "prompt") return tokens.join(",") + ",";
+    return tokens.join(" ");
+  }
+
+  function convertPromptMode(oldMode, newMode) {
+    const oldText = el.promptBox.value;
+    const tokens = parsePromptToTokens(oldText, oldMode);
+
+    // old tokens -> store-like (空白)
+    const storeLike = tokens.map(tok => oldMode === "site" ? tok.replace(/_/g, " ") : tok);
+
+    // store-like -> new tokens
+    const newTokens = storeLike.map(tok => newMode === "site" ? tok.replace(/ /g, "_") : tok);
+
+    el.promptBox.value = buildPromptFromTokens(newTokens, newMode);
+  }
+
+  function toggleToken(enStored) {
+    const mode = state.mode;
+    const token = tokenForMode(enStored, mode);
+    if (!token) return;
+
+    const tokens = parsePromptToTokens(el.promptBox.value, mode);
+    const idx = tokens.indexOf(token);
+
+    if (idx >= 0) {
+      // すでにある → 1つ削除
+      tokens.splice(idx, 1);
+    } else {
+      // 無い → 追加
+      tokens.push(token);
+    }
+
+    el.promptBox.value = buildPromptFromTokens(tokens, mode);
+    el.promptBox.focus();
+  }
+
+  /** ========= JSON 読み込み（追加） ========= */
+  function applyLoadedObject(obj, silent = false) {
+    if (!obj || typeof obj !== "object") throw new Error("JSONが不正です。");
+    const items = Array.isArray(obj.items) ? obj.items : null;
+    if (!items) throw new Error("items配列がありません。");
+
+    const existing = new Set(state.items.map(it => makeKey(it.ja, it.en)));
+    let added = 0;
+
+    for (const it of items) {
+      if (!it) continue;
+      const ja = String(it.ja ?? "").trim();
+      const en = normalizeEnForStore(it.en ?? "");
+      if (!ja || !en) continue;
+
+      const key = makeKey(ja, en);
+      if (existing.has(key)) continue;
+
+      state.items.push({ ja, en });
+      existing.add(key);
+      added++;
+    }
+
+    state.selectedKey = null;
+    render();
+
+    if (!silent) showOk(`JSONを読み込みました（追加: ${added}件）`);
+    return added;
+  }
+
+  function loadJsonFile(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const obj = JSON.parse(String(reader.result || ""));
+        applyLoadedObject(obj, false);
+      } catch (err) {
+        showError("読み込み失敗: " + (err?.message || String(err)));
+      }
+    };
+    reader.onerror = () => showError("ファイルの読み込みに失敗しました。");
+    reader.readAsText(file);
+  }
+
+  async function loadJsonFromSameDirOnce() {
+    try {
+      const res = await fetch(DEFAULT_JSON_URL, { cache: "no-store" });
+      if (!res.ok) return;
+      const obj = await res.json();
+      applyLoadedObject(obj, true);
+    } catch {}
+  }
+
+  /** ========= JSON 保存 ========= */
+  function downloadJson() {
+    const data = {
+      version: state.version,
+      items: state.items.map(it => ({ ja: it.ja, en: it.en })),
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "prompt_words.json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    URL.revokeObjectURL(url);
+    showOk("JSONを保存しました（ダウンロードされます）。");
+  }
+
+  /** ========= 単語追加/削除 ========= */
+  function addWordFromInputs() {
+    const enStored = normalizeEnForStore(el.inpEn.value);
+    const ja = el.inpJa.value.trim();
+
+    try {
+      const e1 = validateEn(enStored); if (e1) throw new Error(e1);
+      const e2 = validateJa(ja); if (e2) throw new Error(e2);
+
+      const key = makeKey(ja, enStored);
+      if (state.items.some(it => makeKey(it.ja, it.en) === key)) {
+        return showError("同じ単語（日本語+英語）が既に登録されています。");
+      }
+
+      state.items.push({ ja, en: enStored });
+      state.selectedKey = key;
+
+      el.inpEn.value = "";
+      el.inpJa.value = "";
+      el.inpEn.focus();
+      showOk("登録しました。");
+      render();
+    } catch (err) {
+      showError(err?.message || String(err));
+    }
+  }
+
+  function deleteSelected() {
+    if (!state.selectedKey) return showError("消去する単語が選択されていません。");
+
+    const before = state.items.length;
+    state.items = state.items.filter(it => makeKey(it.ja, it.en) !== state.selectedKey);
+    const after = state.items.length;
+
+    state.selectedKey = null;
+    if (after < before) {
+      showOk("削除しました。");
+      render();
+    } else {
+      showError("削除対象が見つかりませんでした。");
+    }
+  }
+
+  /** ========= テキストインポート ========= */
+  function parseTextImport(text) {
+    const lines = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+    const parsed = [];
+    const errors = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const raw = lines[i];
+      const lineNo = i + 1;
+      const line = raw.trim();
+
+      if (!line) continue;
+      if (line.startsWith("#")) continue;
+
+      const idx = line.indexOf("=");
+      if (idx <= 0 || idx === line.length - 1) {
+        errors.push(`${lineNo}行目: "英語=日本語" の形式ではありません（${raw}）`);
+        continue;
+      }
+
+      const enRaw = line.slice(0, idx).trim();
+      const ja = line.slice(idx + 1).trim();
+
+      const enStored = normalizeEnForStore(enRaw);
+      const eEn = validateEn(enStored);
+      if (eEn) { errors.push(`${lineNo}行目: 英語が不正（${eEn}）`); continue; }
+
+      const eJa = validateJa(ja);
+      if (eJa) { errors.push(`${lineNo}行目: 日本語が不正（${eJa}）`); continue; }
+
+      parsed.push({ ja, en: enStored });
+    }
+
+    return { parsed, errors };
+  }
+
+  function importTextFile(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const text = String(reader.result || "");
+        const { parsed, errors } = parseTextImport(text);
+
+        if (errors.length > 0) {
+          showError("インポートエラー（インポート中止）:\n" + errors.slice(0, 25).join("\n") + (errors.length > 25 ? `\n...（他${errors.length - 25}件）` : ""));
+          return;
+        }
+
+        const existing = new Set(state.items.map(it => makeKey(it.ja, it.en)));
+        let added = 0;
+        for (const it of parsed) {
+          const key = makeKey(it.ja, it.en);
+          if (existing.has(key)) continue;
+          state.items.push({ ja: it.ja, en: it.en });
+          existing.add(key);
+          added++;
+        }
+
+        state.selectedKey = null;
+        render();
+        showOk(`テキストをインポートしました（追加: ${added}件）`);
+      } catch (err) {
+        showError("インポート失敗: " + (err?.message || String(err)));
+      }
+    };
+    reader.onerror = () => showError("テキストファイルの読み込みに失敗しました。");
+    reader.readAsText(file);
+  }
+
+  /** ========= 検索/描画 ========= */
+  function getFilteredItems() {
+    const qRaw = el.inpFilter.value.trim();
+    const qLower = qRaw.toLowerCase();
+    const qKana = normalizeKana(qRaw);
+
+    let items = [...state.items];
+
+    items.sort((a,b) => {
+      const ga = firstKanaKey(a.ja);
+      const gb = firstKanaKey(b.ja);
+      const oa = groupOrder.get(ga) ?? 999;
+      const ob = groupOrder.get(gb) ?? 999;
+      if (oa !== ob) return oa - ob;
+      const jaCmp = a.ja.localeCompare(b.ja, "ja");
+      if (jaCmp !== 0) return jaCmp;
+      return a.en.localeCompare(b.en, "en");
+    });
+
+    if (!qRaw) return items;
+
+    return items.filter(it => {
+      const jaNorm = normalizeKana(it.ja);
+      const enLower = it.en.toLowerCase();
+      return jaNorm.includes(qKana) || enLower.includes(qLower);
+    });
+  }
+
+  function render() {
+    const items = getFilteredItems();
+    const groups = new Map(GOJUON_GROUPS.map(g => [g.key, []]));
+    for (const it of items) {
+      const g = firstKanaKey(it.ja);
+      groups.get(g)?.push(it);
+    }
+
+    el.list.innerHTML = "";
+
+    for (const g of GOJUON_GROUPS) {
+      const arr = groups.get(g.key) || [];
+      if (arr.length === 0) continue;
+
+      const groupEl = document.createElement("div");
+      groupEl.className = "group";
+
+      const header = document.createElement("div");
+      header.className = "groupHeader";
+      header.innerHTML = `<b>${g.label}</b><span>${arr.length}件</span>`;
+
+      const itemsEl = document.createElement("div");
+      itemsEl.className = "items";
+
+      for (const it of arr) {
+        const key = makeKey(it.ja, it.en);
+
+        const btn = document.createElement("button");
+        btn.className = "itemBtn";
+        btn.type = "button";
+
+        const left = document.createElement("div");
+        left.innerHTML = `<span class="ja">${escapeHtml(it.ja)}</span><span class="en">(${escapeHtml(it.en)})</span>`;
+
+        const right = document.createElement("div");
+        right.className = "right";
+
+        if (state.selectedKey === key) {
+          const pill = document.createElement("span");
+          pill.className = "pill";
+          pill.textContent = "選択";
+          right.appendChild(pill);
+        }
+
+        btn.appendChild(left);
+        btn.appendChild(right);
+
+        btn.addEventListener("click", () => {
+          state.selectedKey = key;
+          toggleToken(it.en); // 追加/削除
+          render();
+        });
+
+        itemsEl.appendChild(btn);
+      }
+
+      groupEl.appendChild(header);
+      groupEl.appendChild(itemsEl);
+      el.list.appendChild(groupEl);
+    }
+
+    if (el.list.childElementCount === 0) {
+      const empty = document.createElement("div");
+      empty.className = "hint";
+      empty.textContent = "表示できる単語がありません（検索条件・データを確認してください）。";
+      el.list.appendChild(empty);
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"
+    }[c]));
+  }
+
+  /** ========= UIイベント ========= */
+  el.btnAdd.addEventListener("click", addWordFromInputs);
+  el.inpEn.addEventListener("keydown", (e) => { if (e.key === "Enter") addWordFromInputs(); });
+  el.inpJa.addEventListener("keydown", (e) => { if (e.key === "Enter") addWordFromInputs(); });
+
+  el.btnDeleteSelected.addEventListener("click", deleteSelected);
+
+  el.selMode.addEventListener("change", () => {
+    const newMode = el.selMode.value === "site" ? "site" : "prompt";
+    if (newMode === state.mode) return;
+    convertPromptMode(state.mode, newMode);
+    state.mode = newMode;
+  });
+
+  el.btnClearPrompt.addEventListener("click", () => {
+    el.promptBox.value = "";
+    showOk("Promptをクリアしました。");
+  });
+
+  el.btnExportPrompt.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(el.promptBox.value);
+      showOk("Promptをコピーしました。");
+    } catch {
+      el.promptBox.select();
+      document.execCommand("copy");
+      showOk("Promptをコピーしました（フォールバック）。");
+    }
+  });
+
+  el.btnSave.addEventListener("click", downloadJson);
+
+  el.btnLoad.addEventListener("click", () => {
+    el.fileInput.value = "";
+    el.fileInput.click();
+  });
+  el.fileInput.addEventListener("change", () => {
+    const f = el.fileInput.files?.[0];
+    if (!f) return;
+    loadJsonFile(f);
+  });
+
+  el.btnImportText.addEventListener("click", () => {
+    el.textInput.value = "";
+    el.textInput.click();
+  });
+  el.textInput.addEventListener("change", () => {
+    const f = el.textInput.files?.[0];
+    if (!f) return;
+    importTextFile(f);
+  });
+
+  el.inpFilter.addEventListener("input", render);
+
+  /** ========= 初期表示 ========= */
+  render();
+  loadJsonFromSameDirOnce();
+
+  window.addEventListener("beforeunload", (e) => {
+    e.preventDefault();
+    e.returnValue = "";
+  });
+})();
+</script>
+</body>
+</html>
