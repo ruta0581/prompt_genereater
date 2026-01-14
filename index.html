@@ -335,6 +335,12 @@
     return tokens.join(" ");
   }
 
+  function focusPromptNoScroll() {
+    // preventScroll対応ブラウザではスクロール位置を保持
+    try { el.promptBox.focus({ preventScroll: true }); }
+    catch { focusPromptNoScroll(); }
+  }
+
   function convertPromptMode(oldMode, newMode) {
     const oldText = el.promptBox.value;
     const tokens = parsePromptToTokens(oldText, oldMode);
@@ -365,7 +371,7 @@
     }
 
     el.promptBox.value = buildPromptFromTokens(tokens, mode);
-    el.promptBox.focus();
+    focusPromptNoScroll();
   }
 
   /** ========= JSON 読み込み（追加） ========= */
