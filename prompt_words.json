@@ -1152,6 +1152,18 @@
     {
       "ja": "ねんえきせいぶつ",
       "en": "goo creature"
+    },
+    {
+      "ja": "ふくすうのめ",
+      "en": "multi eye"
+    },
+    {
+      "ja": "おなかのくち",
+      "en": "belly mouth"
+    },
+    {
+      "ja": "くちをあける",
+      "en": "open mouth"
     }
   ]
 }
