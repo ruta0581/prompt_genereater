@@ -1136,6 +1136,22 @@
     {
       "ja": "よこのしてん",
       "en": "side view"
+    },
+    {
+      "ja": "はんとうめい",
+      "en": "transparent"
+    },
+    {
+      "ja": "はんとうめいなからだ",
+      "en": "translucent body"
+    },
+    {
+      "ja": "スライム",
+      "en": "slime"
+    },
+    {
+      "ja": "ねんえきせいぶつ",
+      "en": "goo creature"
     }
   ]
 }
