@@ -7,6 +7,7 @@
   <style>
     :root { --bg:#0b0d12; --panel:#121726; --panel2:#0f1422; --text:#e8eefc; --muted:#aab4d6; --line:#243050; --acc:#6aa6ff; --danger:#ff6a6a; }
     * { box-sizing: border-box; }
+    [hidden] { display:none !important; }
     body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans JP", sans-serif; background:var(--bg); color:var(--text); }
     header { padding:16px 18px; border-bottom:1px solid var(--line); background:linear-gradient(180deg, #0f1320, #0b0d12); }
     header h1 { margin:0; font-size:16px; font-weight:700; }
@@ -197,7 +198,7 @@
   <section class="card">
     <div class="row" style="justify-content:space-between; align-items:end;">
       <div style="flex:1 1 auto;">
-        <label>単語検索（日本語/英語どちらでも） ※ひらがな/カタカナは同一扱い（あ＝ア）</label>
+        <label for="inpFilter">単語検索（日本語/英語どちらでも） ※ひらがな/カタカナは同一扱い（あ＝ア）</label>
         <input id="inpFilter" class="search" placeholder="例: び / ビ / masterpiece / quality" />
       </div>
     </div>
@@ -206,7 +207,9 @@
       表示・並びは<b>日本語五十音のみ</b>。クリックでPromptへ<b>追加/削除（トグル）</b>。右側の「選択」タグは最後にクリックした単語です。
     </div>
 
+    <div id="listCount" class="hint" role="status" aria-live="polite"></div>
     <div id="list" class="listWrap" style="margin-top:12px;"></div>
+    <div id="listEmpty" class="hint" hidden>表示できる単語がありません（検索条件・データを確認してください）。</div>
   </section>
 </main>
 
@@ -215,7 +218,6 @@
   /** ========= 設定 ========= */
   const params = new URLSearchParams(location.search);
   const DEFAULT_JSON_URL = params.get("json") || "prompt_words.json";
-  const MAX_VISIBLE_ITEMS = 300;
 
   /** ========= データ ========= */
   const state = {
@@ -253,6 +255,8 @@
 
     inpFilter: document.getElementById("inpFilter"),
     list: document.getElementById("list"),
+    listCount: document.getElementById("listCount"),
+    listEmpty: document.getElementById("listEmpty"),
     msgError: document.getElementById("msgError"),
     msgOk: document.getElementById("msgOk"),
   };
@@ -367,7 +371,7 @@
   function focusPromptNoScroll() {
     // preventScroll対応ブラウザではスクロール位置を保持
     try { el.promptBox.focus({ preventScroll: true }); }
-    catch { focusPromptNoScroll(); }
+    catch { el.promptBox.focus(); }
   }
 
   function convertPromptMode(oldMode, newMode) {
@@ -642,53 +646,41 @@
   }
 
   /** ========= 検索/描画 ========= */
-  function getFilteredItems() {
-    const qRaw = el.inpFilter.value.trim();
-    const qLower = qRaw.toLowerCase();
-    const qKana = normalizeKana(qRaw);
+  const jaCollator = new Intl.Collator("ja");
+  const enCollator = new Intl.Collator("en");
+  let wordGroups = [];
+  const entriesByKey = new Map();
+  const entriesByEn = new Map();
+  let activeEntries = new Set();
+  let filterFrame = 0;
+  let promptFrame = 0;
+  const selectionPill = document.createElement("span");
+  selectionPill.className = "pill";
+  selectionPill.textContent = "選択";
 
-    let items = [...state.items];
-
-    items.sort((a,b) => {
-      const ga = firstKanaKey(a.ja);
-      const gb = firstKanaKey(b.ja);
-      const oa = groupOrder.get(ga) ?? 999;
-      const ob = groupOrder.get(gb) ?? 999;
-      if (oa !== ob) return oa - ob;
-      const jaCmp = a.ja.localeCompare(b.ja, "ja");
-      if (jaCmp !== 0) return jaCmp;
-      return a.en.localeCompare(b.en, "en");
-    });
-
-    if (!qRaw) return items;
-
-    return items.filter(it => {
-      const jaNorm = normalizeKana(it.ja);
-      const enLower = it.en.toLowerCase();
-      return jaNorm.includes(qKana) || enLower.includes(qLower);
-    });
-  }
-
-  
-  function tokenExistsInPrompt(enStored) {
-    const mode = state.mode;
-    const token = tokenForMode(enStored, mode);
-    if (!token) return false;
-    const tokens = parsePromptToTokens(el.promptBox.value, mode);
-    return tokens.includes(token);
-  }
-
-function render() {
-    syncRenameForm();
-    const allItems = getFilteredItems();
-    const items = allItems.slice(0, MAX_VISIBLE_ITEMS);
+  // 単語データが変わったときだけ、検索用データ・並び順・ボタンを作り直す。
+  function render() {
+    const items = state.items.map(it => ({
+      item: it,
+      key: makeKey(it.ja, it.en),
+      group: firstKanaKey(it.ja),
+      jaSearch: normalizeKana(it.ja),
+      enSearch: it.en.toLowerCase(),
+    }));
+    items.sort((a, b) =>
+      groupOrder.get(a.group) - groupOrder.get(b.group)
+      || jaCollator.compare(a.item.ja, b.item.ja)
+      || enCollator.compare(a.item.en, b.item.en)
+    );
     const groups = new Map(GOJUON_GROUPS.map(g => [g.key, []]));
-    for (const it of items) {
-      const g = firstKanaKey(it.ja);
-      groups.get(g)?.push(it);
-    }
+    for (const entry of items) groups.get(entry.group).push(entry);
 
-    el.list.innerHTML = "";
+    selectionPill.remove();
+    entriesByKey.clear();
+    entriesByEn.clear();
+    activeEntries.clear();
+    wordGroups = [];
+    const fragment = document.createDocumentFragment();
 
     for (const g of GOJUON_GROUPS) {
       const arr = groups.get(g.key) || [];
@@ -699,71 +691,120 @@ function render() {
 
       const header = document.createElement("div");
       header.className = "groupHeader";
-      header.innerHTML = `<b>${g.label}</b><span>${arr.length}件</span>`;
+      const label = document.createElement("b");
+      label.textContent = g.label;
+      const count = document.createElement("span");
+      header.append(label, count);
 
       const itemsEl = document.createElement("div");
       itemsEl.className = "items";
 
-      for (const it of arr) {
-        const key = makeKey(it.ja, it.en);
-
+      for (const entry of arr) {
+        const it = entry.item;
         const btn = document.createElement("button");
         btn.className = "itemBtn";
-        if (tokenExistsInPrompt(it.en)) btn.classList.add("active");
         btn.type = "button";
+        btn.dataset.key = entry.key;
+        btn.setAttribute("aria-pressed", "false");
 
         const left = document.createElement("div");
-        left.innerHTML = `<span class="ja">${escapeHtml(it.ja)}</span><span class="en">(${escapeHtml(it.en)})</span>`;
+        const ja = document.createElement("span");
+        ja.className = "ja";
+        ja.textContent = it.ja;
+        const en = document.createElement("span");
+        en.className = "en";
+        en.textContent = `(${it.en})`;
+        left.append(ja, en);
 
         const right = document.createElement("div");
         right.className = "right";
 
-        if (state.selectedKey === key) {
-          const pill = document.createElement("span");
-          pill.className = "pill";
-          pill.textContent = "選択";
-          right.appendChild(pill);
-        }
-
         btn.appendChild(left);
         btn.appendChild(right);
-
-        btn.addEventListener("click", () => {
-          state.selectedKey = key;
-          toggleToken(it.en); // 追加/削除
-          render();
-        });
-
         itemsEl.appendChild(btn);
+
+        entry.button = btn;
+        entry.right = right;
+        entriesByKey.set(entry.key, entry);
+        if (!entriesByEn.has(it.en)) entriesByEn.set(it.en, []);
+        entriesByEn.get(it.en).push(entry);
       }
 
       groupEl.appendChild(header);
       groupEl.appendChild(itemsEl);
-      el.list.appendChild(groupEl);
+      fragment.appendChild(groupEl);
+      wordGroups.push({ element: groupEl, count, entries: arr });
     }
 
-    if (el.list.childElementCount === 0) {
-      const empty = document.createElement("div");
-      empty.className = "hint";
-      empty.textContent = "表示できる単語がありません（検索条件・データを確認してください）。";
-      el.list.appendChild(empty);
-    }
-
-    if (allItems.length > MAX_VISIBLE_ITEMS) {
-      const notice = document.createElement("div");
-      notice.className = "hint";
-      notice.textContent = `${allItems.length}件中、先頭${MAX_VISIBLE_ITEMS}件を表示しています。単語検索で絞り込んでください。`;
-      el.list.appendChild(notice);
-    }
+    el.list.replaceChildren(fragment);
+    filterWords();
+    syncPromptHighlights();
+    syncSelection();
   }
 
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, c => ({
-      "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"
-    }[c]));
+  // 検索中もボタンを再利用し、表示状態と件数だけを更新する。
+  function filterWords() {
+    const query = el.inpFilter.value.trim();
+    const qLower = query.toLowerCase();
+    const qKana = normalizeKana(query);
+    let visibleCount = 0;
+    for (const group of wordGroups) {
+      let count = 0;
+      for (const entry of group.entries) {
+        const visible = !query || entry.jaSearch.includes(qKana) || entry.enSearch.includes(qLower);
+        if (entry.button.hidden === visible) entry.button.hidden = !visible;
+        if (visible) count++;
+      }
+      if (group.element.hidden !== (count === 0)) group.element.hidden = count === 0;
+      const countText = `${count}件`;
+      if (group.count.textContent !== countText) group.count.textContent = countText;
+      visibleCount += count;
+    }
+    el.listCount.textContent = `登録 ${state.items.length}件 / 表示 ${visibleCount}件`;
+    el.listEmpty.hidden = visibleCount !== 0;
+  }
+
+  function syncSelection() {
+    const entry = entriesByKey.get(state.selectedKey);
+    if (entry) entry.right.appendChild(selectionPill);
+    else selectionPill.remove();
+    syncRenameForm();
+  }
+
+  // Promptは一度だけ解析し、追加・削除された単語の強調表示だけを更新する。
+  function syncPromptHighlights() {
+    const nextActive = new Set();
+    const tokens = new Set(parsePromptToTokens(el.promptBox.value, state.mode));
+    for (const token of tokens) {
+      const en = state.mode === "site" ? token.replace(/_/g, " ") : token;
+      for (const entry of entriesByEn.get(en) || []) nextActive.add(entry);
+    }
+    for (const entry of activeEntries) {
+      if (nextActive.has(entry)) continue;
+      entry.button.classList.remove("active");
+      entry.button.setAttribute("aria-pressed", "false");
+    }
+    for (const entry of nextActive) {
+      if (activeEntries.has(entry)) continue;
+      entry.button.classList.add("active");
+      entry.button.setAttribute("aria-pressed", "true");
+    }
+    activeEntries = nextActive;
   }
 
   /** ========= UIイベント ========= */
+  // 一覧のクリックは親要素でまとめて処理する。
+  el.list.addEventListener("click", (event) => {
+    const button = event.target.closest("button.itemBtn");
+    if (!button || !el.list.contains(button)) return;
+    const entry = entriesByKey.get(button.dataset.key);
+    if (!entry) return;
+    state.selectedKey = entry.key;
+    toggleToken(entry.item.en);
+    syncPromptHighlights();
+    syncSelection();
+  });
+
   el.btnAdd.addEventListener("click", addWordFromInputs);
   el.inpEn.addEventListener("keydown", (e) => { if (e.key === "Enter") addWordFromInputs(); });
   el.inpJa.addEventListener("keydown", (e) => { if (e.key === "Enter") addWordFromInputs(); });
@@ -781,10 +822,12 @@ function render() {
     if (newMode === state.mode) return;
     convertPromptMode(state.mode, newMode);
     state.mode = newMode;
+    syncPromptHighlights();
   });
 
   el.btnClearPrompt.addEventListener("click", () => {
     el.promptBox.value = "";
+    syncPromptHighlights();
     showOk("Promptをクリアしました。");
   });
 
@@ -821,7 +864,21 @@ function render() {
     importTextFile(f);
   });
 
-  el.inpFilter.addEventListener("input", render);
+  el.inpFilter.addEventListener("input", () => {
+    if (filterFrame) return;
+    filterFrame = requestAnimationFrame(() => {
+      filterFrame = 0;
+      filterWords();
+    });
+  });
+
+  el.promptBox.addEventListener("input", () => {
+    if (promptFrame) return;
+    promptFrame = requestAnimationFrame(() => {
+      promptFrame = 0;
+      syncPromptHighlights();
+    });
+  });
 
   /** ========= 初期表示 ========= */
   render();
