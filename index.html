@@ -30,6 +30,7 @@
     button { cursor:pointer; transition: .12s transform, .12s opacity, .12s border-color; }
     button:hover { border-color:#3b5aa7; }
     button:active { transform: translateY(1px); }
+    button:disabled, input:disabled { opacity:.5; cursor:default; }
     .btn { background:#162044; }
     .btn.acc { border-color:#2f5db6; }
     .btn.danger { border-color:#7a2c2c; background:#2a1414; color:#ffd6d6; }
@@ -170,6 +171,24 @@
             <button class="btn danger" id="btnDeleteSelected">単語消去（選択中）</button>
           </div>
         </div>
+
+        <hr class="divider">
+
+        <b style="font-size:13px;">選択中の単語をリネーム</b>
+        <div class="hint" id="renameTarget">一覧から変更する単語を選択してください。</div>
+        <div class="row" style="margin-top:10px;">
+          <div class="grow">
+            <label for="inpRenameEn">変更後の英語（「_」は半角スペースに置換）</label>
+            <input id="inpRenameEn" class="search mono" disabled />
+          </div>
+          <div class="grow">
+            <label for="inpRenameJa">変更後の日本語（ひらがな/カタカナのみ）</label>
+            <input id="inpRenameJa" class="search" disabled />
+          </div>
+          <div class="row miniButtons">
+            <button class="btn acc" id="btnRename" disabled>リネーム（選択中）</button>
+          </div>
+        </div>
       </div>
     </details>
   </section>
@@ -196,6 +215,7 @@
   /** ========= 設定 ========= */
   const params = new URLSearchParams(location.search);
   const DEFAULT_JSON_URL = params.get("json") || "prompt_words.json";
+  const MAX_VISIBLE_ITEMS = 300;
 
   /** ========= データ ========= */
   const state = {
@@ -204,6 +224,10 @@
     selectedKey: /** @type {string|null} */ (null),
     mode: /** @type {"prompt"|"site"} */ ("prompt"),
   };
+  function wordSnapshot(items = state.items) {
+    return JSON.stringify(items.map(it => JSON.stringify([it.ja, it.en])).sort());
+  }
+  let savedWordSnapshot = wordSnapshot();
 
   /** ========= 要素 ========= */
   const el = {
@@ -217,6 +241,10 @@
     inpJa: document.getElementById("inpJa"),
     btnAdd: document.getElementById("btnAdd"),
     btnDeleteSelected: document.getElementById("btnDeleteSelected"),
+    inpRenameEn: document.getElementById("inpRenameEn"),
+    inpRenameJa: document.getElementById("inpRenameJa"),
+    btnRename: document.getElementById("btnRename"),
+    renameTarget: document.getElementById("renameTarget"),
     selMode: document.getElementById("selMode"),
 
     promptBox: document.getElementById("promptBox"),
@@ -228,6 +256,7 @@
     msgError: document.getElementById("msgError"),
     msgOk: document.getElementById("msgOk"),
   };
+  let renameFormKey;
 
   /** ========= メッセージ ========= */
   function showError(msg) {
@@ -381,6 +410,8 @@
     if (!items) throw new Error("items配列がありません。");
 
     const existing = new Set(state.items.map(it => makeKey(it.ja, it.en)));
+    const loaded = [];
+    const loadedKeys = new Set();
     let added = 0;
 
     for (const it of items) {
@@ -390,12 +421,18 @@
       if (!ja || !en) continue;
 
       const key = makeKey(ja, en);
+      if (!loadedKeys.has(key)) {
+        loaded.push({ ja, en });
+        loadedKeys.add(key);
+      }
       if (existing.has(key)) continue;
 
       state.items.push({ ja, en });
       existing.add(key);
       added++;
     }
+
+    if (silent) savedWordSnapshot = wordSnapshot(loaded);
 
     state.selectedKey = null;
     render();
@@ -443,11 +480,12 @@
     a.click();
     a.remove();
 
+    savedWordSnapshot = wordSnapshot();
     URL.revokeObjectURL(url);
     showOk("JSONを保存しました（ダウンロードされます）。");
   }
 
-  /** ========= 単語追加/削除 ========= */
+  /** ========= 単語追加/リネーム/削除 ========= */
   function addWordFromInputs() {
     const enStored = normalizeEnForStore(el.inpEn.value);
     const ja = el.inpJa.value.trim();
@@ -469,6 +507,50 @@
       el.inpEn.focus();
       showOk("登録しました。");
       render();
+    } catch (err) {
+      showError(err?.message || String(err));
+    }
+  }
+
+  function syncRenameForm() {
+    if (renameFormKey === state.selectedKey) return;
+    renameFormKey = state.selectedKey;
+    const item = state.selectedKey
+      ? state.items.find(it => makeKey(it.ja, it.en) === state.selectedKey)
+      : null;
+
+    el.inpRenameEn.value = item?.en ?? "";
+    el.inpRenameJa.value = item?.ja ?? "";
+    el.inpRenameEn.disabled = !item;
+    el.inpRenameJa.disabled = !item;
+    el.btnRename.disabled = !item;
+    el.renameTarget.textContent = item
+      ? `変更対象: ${item.ja}（${item.en}）`
+      : "一覧から変更する単語を選択してください。";
+  }
+
+  function renameSelected() {
+    if (!state.selectedKey) return showError("リネームする単語が選択されていません。");
+    const item = state.items.find(it => makeKey(it.ja, it.en) === state.selectedKey);
+    if (!item) return showError("リネーム対象が見つかりませんでした。");
+
+    const enStored = normalizeEnForStore(el.inpRenameEn.value);
+    const ja = el.inpRenameJa.value.trim();
+    try {
+      const e1 = validateEn(enStored); if (e1) throw new Error(e1);
+      const e2 = validateJa(ja); if (e2) throw new Error(e2);
+
+      const key = makeKey(ja, enStored);
+      if (key === state.selectedKey) return showOk("名前は変更されていません。");
+      if (state.items.some(it => it !== item && makeKey(it.ja, it.en) === key)) {
+        throw new Error("同じ単語（日本語+英語）が既に登録されています。");
+      }
+
+      item.ja = ja;
+      item.en = enStored;
+      state.selectedKey = key;
+      render();
+      showOk("名前を変更しました。JSON保存で保存してください。");
     } catch (err) {
       showError(err?.message || String(err));
     }
@@ -597,7 +679,9 @@
   }
 
 function render() {
-    const items = getFilteredItems();
+    syncRenameForm();
+    const allItems = getFilteredItems();
+    const items = allItems.slice(0, MAX_VISIBLE_ITEMS);
     const groups = new Map(GOJUON_GROUPS.map(g => [g.key, []]));
     for (const it of items) {
       const g = firstKanaKey(it.ja);
@@ -664,6 +748,13 @@ function render() {
       empty.textContent = "表示できる単語がありません（検索条件・データを確認してください）。";
       el.list.appendChild(empty);
     }
+
+    if (allItems.length > MAX_VISIBLE_ITEMS) {
+      const notice = document.createElement("div");
+      notice.className = "hint";
+      notice.textContent = `${allItems.length}件中、先頭${MAX_VISIBLE_ITEMS}件を表示しています。単語検索で絞り込んでください。`;
+      el.list.appendChild(notice);
+    }
   }
 
   function escapeHtml(s) {
@@ -678,6 +769,12 @@ function render() {
   el.inpJa.addEventListener("keydown", (e) => { if (e.key === "Enter") addWordFromInputs(); });
 
   el.btnDeleteSelected.addEventListener("click", deleteSelected);
+  el.btnRename.addEventListener("click", renameSelected);
+  for (const input of [el.inpRenameEn, el.inpRenameJa]) {
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.isComposing) renameSelected();
+    });
+  }
 
   el.selMode.addEventListener("change", () => {
     const newMode = el.selMode.value === "site" ? "site" : "prompt";
@@ -731,6 +828,7 @@ function render() {
   loadJsonFromSameDirOnce();
 
   window.addEventListener("beforeunload", (e) => {
+    if (wordSnapshot() === savedWordSnapshot) return;
     e.preventDefault();
     e.returnValue = "";
   });
