@@ -1444,6 +1444,22 @@
     {
       "ja": "オブジェクトヘッド",
       "en": "object head"
+    },
+    {
+      "ja": "アリクイ",
+      "en": "anteater"
+    },
+    {
+      "ja": "ペストいし",
+      "en": "plague doctor"
+    },
+    {
+      "ja": "ペストマスク",
+      "en": "plague mask"
+    },
+    {
+      "ja": "ちょうるい",
+      "en": "avian"
     }
   ]
 }
